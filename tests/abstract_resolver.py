@@ -11,7 +11,7 @@ class AbstractResolverTest(object):
 
     def test_format(self):
         self.assertEqual(
-                self.resolver._format_from_ident(self.identifier),
+                self.resolver.format_from_ident(self.identifier),
                 self.expected_format
         )
 

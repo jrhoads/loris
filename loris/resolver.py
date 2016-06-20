@@ -26,8 +26,8 @@ class _AbstractResolver(object):
 
     def is_resolvable(self, ident):
         """
-        The idea here is that in some scenarios it may be cheaper to check 
-        that an id is resolvable than to actually resolve it. For example, for 
+        The idea here is that in some scenarios it may be cheaper to check
+        that an id is resolvable than to actually resolve it. For example, for
         an HTTP resolver, this could be a HEAD instead of a GET.
 
         Args:
@@ -41,10 +41,10 @@ class _AbstractResolver(object):
 
     def resolve(self, ident):
         """
-        Given the identifier of an image, get the path (fp) and format (one of. 
+        Given the identifier of an image, get the path (fp) and format (one of.
         'jpg', 'tif', or 'jp2'). This will likely need to be reimplemented for
         environments and can be as smart or dumb as you want.
-        
+
         Args:
             ident (str):
                 The identifier for the image.
@@ -62,13 +62,13 @@ class SimpleFSResolver(_AbstractResolver):
     def __init__(self, config):
         super(SimpleFSResolver, self).__init__(config)
         if 'src_img_roots' in self.config:
-            self.cache_roots = self.config['src_img_roots']
+            self.source_roots = self.config['src_img_roots']
         else:
-            self.cache_roots = [self.config['src_img_root']]
+            self.source_roots = [self.config['src_img_root']]
 
     def get_fp(self, ident):
         ident = unquote(ident)
-        for directory in self.cache_roots:
+        for directory in self.source_roots:
             fp = join(directory, ident)
             if exists(fp):
                 return fp
@@ -76,13 +76,12 @@ class SimpleFSResolver(_AbstractResolver):
     def is_resolvable(self, ident):
         return not self.get_fp(ident) is None
 
-    @staticmethod
-    def _format_from_ident(ident):
+    def format_from_ident(self, ident):
         return ident.split('.')[-1]
 
     def resolve(self, ident):
-        # For this dumb version a constant path is prepended to the identfier 
-        # supplied to get the path It assumes this 'identifier' ends with a file 
+        # For this dumb version a constant path is prepended to the identfier
+        # supplied to get the path It assumes this 'identifier' ends with a file
         # extension from which the format is then derived.
         fp = self.get_fp(ident)
         logger.debug('src image: %s' % (fp,))
@@ -93,7 +92,7 @@ class SimpleFSResolver(_AbstractResolver):
             logger.warn(log_message)
             raise ResolverException(404, public_message)
 
-        format = SimpleFSResolver._format_from_ident(ident)
+        format = self.format_from_ident(ident)
         logger.debug('src format %s' % (format,))
 
         return (fp, format)
@@ -114,11 +113,12 @@ class ExtensionNormalizingFSResolver(SimpleFSResolver):
         super(ExtensionNormalizingFSResolver, self).__init__(config)
         self.extension_map = self.config['extension_map']
 
-    def resolve(self, ident):
-        fp, format = super(ExtensionNormalizingFSResolver, self).resolve(ident)
+    def format_from_ident(self, ident):
+        format = super(ExtensionNormalizingFSResolver, self).format_from_ident(ident)
         format = format.lower()
         format = self.extension_map.get(format, format)
-        return (fp, format)
+        return format
+
 
 class SimpleHTTPResolver(_AbstractResolver):
     '''
@@ -230,7 +230,7 @@ class SimpleHTTPResolver(_AbstractResolver):
     def _web_request_url(self, ident):
         if (ident[0:6] == 'http:/' or ident[0:7] == 'https:/') and self.uri_resolvable:
             # ident is http request with no prefix or suffix specified
-            # For some reason, identifier is http:/<url> or https:/<url>? 
+            # For some reason, identifier is http:/<url> or https:/<url>?
             # Hack to correct without breaking valid urls.
             first_slash = ident.find('/')
             return '%s//%s' % (ident[:first_slash], ident[first_slash:].lstrip('/'))
@@ -391,11 +391,12 @@ class TemplateHTTPResolver(SimpleHTTPResolver):
         # required for simplehttpresolver
         # all templates are assumed to be uri resolvable
         self.uri_resolvable = True
-                
+
         self.ssl_check = self.config.get('ssl_check', True)
 
     def _web_request_url(self, ident):
-        # only split identifiers that look like template ids; ignore other requests (e.g. favicon)
+        # only split identifiers that look like template ids;
+        # ignore other requests (e.g. favicon)
         if ':' not in ident:
             return
         prefix, ident = ident.split(':', 1)
@@ -422,9 +423,9 @@ class SourceImageCachingResolver(_AbstractResolver):
     Example resolver that one might use if image files were coming from
     mounted network storage. The first call to `resolve()` copies the source
     image into a local cache; subsequent calls use local copy from the cache.
- 
-    The config dictionary MUST contain 
-     * `cache_root`, which is the absolute path to the directory where images 
+
+    The config dictionary MUST contain
+     * `cache_root`, which is the absolute path to the directory where images
         should be cached.
      * `source_root`, the root directory for source images.
     '''
@@ -438,8 +439,7 @@ class SourceImageCachingResolver(_AbstractResolver):
         fp = join(self.source_root, ident)
         return exists(fp)
 
-    @staticmethod
-    def _format_from_ident(ident):
+    def format_from_ident(self, ident):
         return ident.split('.')[-1]
 
     def resolve(self, ident):
@@ -447,7 +447,7 @@ class SourceImageCachingResolver(_AbstractResolver):
         local_fp = join(self.cache_root, ident)
 
         if exists(local_fp):
-            format = SourceImageCachingResolver._format_from_ident(ident)
+            format = self.format_from_ident(ident)
             logger.debug('src image from local disk: %s' % (local_fp,))
             return (local_fp, format)
         else:
@@ -463,7 +463,7 @@ class SourceImageCachingResolver(_AbstractResolver):
             copy(fp, local_fp)
             logger.info("Copied %s to %s" % (fp, local_fp))
 
-            format = SourceImageCachingResolver._format_from_ident(ident)
+            format = self.format_from_ident(ident)
             logger.debug('src format %s' % (format,))
 
             return (local_fp, format)

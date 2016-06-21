@@ -435,38 +435,52 @@ class SourceImageCachingResolver(_AbstractResolver):
         self.source_root = self.config['source_root']
 
     def is_resolvable(self, ident):
-        ident = unquote(ident)
-        fp = join(self.source_root, ident)
-        return exists(fp)
+        source_fp = self.source_file_path(ident)
+        return exists(source_fp)
 
     def format_from_ident(self, ident):
         return ident.split('.')[-1]
 
-    def resolve(self, ident):
+    def source_file_path(self, ident):
         ident = unquote(ident)
-        local_fp = join(self.cache_root, ident)
+        return join(self.source_root, ident)
 
-        if exists(local_fp):
-            format = self.format_from_ident(ident)
-            logger.debug('src image from local disk: %s' % (local_fp,))
-            return (local_fp, format)
-        else:
-            fp = join(self.source_root, ident)
-            logger.debug('src image: %s' % (fp,))
-            if not exists(fp):
-                public_message = 'Source image not found for identifier: %s.' % (ident,)
-                log_message = 'Source image not found at %s for identifier: %s.' % (fp,ident)
-                logger.warn(log_message)
-                raise ResolverException(404, public_message)
+    def cache_file_path(self, ident):
+        ident = unquote(ident)
+        return join(self.cache_root, ident)
 
-            makedirs(dirname(local_fp))
-            copy(fp, local_fp)
-            logger.info("Copied %s to %s" % (fp, local_fp))
+    def in_cache(self, ident):
+        return exists(self.cache_file_path(ident))
 
-            format = self.format_from_ident(ident)
-            logger.debug('src format %s' % (format,))
+    def copy_to_cache(self, ident):
+        source_fp = self.source_file_path(ident)
+        cache_fp = self.cache_file_path(ident)
 
-            return (local_fp, format)
+        makedirs(dirname(cache_fp))
+        copy(source_fp, cache_fp)
+        logger.info("Copied %s to %s" % (source_fp, cache_fp))
+
+    def raise_404_for_ident(self, ident):
+            source_fp = self.source_file_path(ident)
+            public_message = 'Source image not found for identifier: %s.' % (ident,)
+            log_message = 'Source image not found at %s for identifier: %s.' % (source_fp,ident)
+            logger.warn(log_message)
+            raise ResolverException(404, public_message)
+
+    def resolve(self, ident):
+        if not self.is_resolvable(ident):
+            self.raise_404_for_ident(ident)
+
+        cache_fp = self.cache_file_path(ident)
+        format = self.format_from_ident(ident)
+        logger.debug('src format %s' % (format,))
+
+        if not self.in_cache(ident):
+            self.copy_to_cache(ident)
+        logger.debug(
+                'Image Served from local cache: %s' % (cache_fp,)
+        )
+        return (cache_fp, format)
 
 
 

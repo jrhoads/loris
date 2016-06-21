@@ -266,72 +266,106 @@ class SimpleHTTPResolver(_AbstractResolver):
 
         return file_structure
 
-    def resolve(self, ident):
+    def cache_dir_path(self, ident):
         ident = unquote(ident)
+        return join(
+                self.cache_root,
+                SimpleHTTPResolver._cache_subroot(ident)
+        )
 
-        local_fp = join(self.cache_root, SimpleHTTPResolver._cache_subroot(ident))
-        local_fp = join(local_fp)
+    def cache_file_path(self, ident):
+        pass
 
-        if exists(local_fp):
-            cached_object = glob.glob(join(local_fp, 'loris_cache.*'))
+    def raise_404_for_ident(self, ident):
+        message = 'Image not found for identifier: %s.' % (ident)
+        raise ResolverException(404, public_message)
 
-            if len(cached_object) > 0:
-                cached_object = cached_object[0]
+    def cached_files_for_ident(self, ident):
+        cache_dir = self.cache_dir_path(ident)
+        if exists(cache_dir):
+            return glob.glob(join(cache_dir, 'loris_cache.*'))
+        return []
+
+    def in_cache(self, ident):
+        cache_dir = self.cache_dir_path(ident)
+        if exists(cache_dir):
+            cached_files = glob.glob(join(cache_dir, 'loris_cache.*'))
+            if cached_files:
+                return True
             else:
-                public_message = 'Cached image not found for identifier: %s.' % (ident)
                 log_message = 'Cached image not found for identifier: %s. Empty directory where image expected?' % (ident)
                 logger.warn(log_message)
-                raise ResolverException(404, public_message)
+                self.raise_404_for_ident(ident)
+        return False
 
-            format = self.format_from_ident(cached_object,None)
-            logger.debug('src image from local disk: %s' % (cached_object,))
-            return (cached_object, format)
+    def cached_object(self, ident):
+        cache_dir = self.cache_dir_path(ident)
+        cached_object = glob.glob(join(cache_dir, 'loris_cache.*'))
+
+        if len(cached_object) > 0:
+            cached_object = cached_object[0]
         else:
-            fp = self._web_request_url(ident)
+            public_message = 'Cached image not found for identifier: %s.' % (ident)
+            log_message = 'Cached image not found for identifier: %s. Empty directory where image expected?' % (ident)
+            logger.warn(log_message)
+            raise ResolverException(404, public_message)
+        return cached_object
 
-            logger.debug('src image: %s' % (fp,))
+    def copy_to_cache(self, ident):
+        fp = self._web_request_url(ident)
+        cache_dir = self.cache_dir_path(ident)
 
+        logger.debug('src image: %s' % (fp,))
+
+        try:
+            response = requests.get(fp, stream = False, verify=self.ssl_check, **self.request_options())
+        except requests.exceptions.MissingSchema:
+            public_message = 'Bad URL request made for identifier: %s.' % (ident,)
+            log_message = 'Bad URL request at %s for identifier: %s.' % (fp,ident)
+            logger.warn(log_message)
+            raise ResolverException(404, public_message)
+
+        if response.status_code != 200:
+            public_message = 'Source image not found for identifier: %s. Status code returned: %s' % (ident,response.status_code)
+            log_message = 'Source image not found at %s for identifier: %s. Status code returned: %s' % (fp,ident,response.status_code)
+            logger.warn(log_message)
+            raise ResolverException(404, public_message)
+
+        if 'content-type' in response.headers:
             try:
-                response = requests.get(fp, stream = False, verify=self.ssl_check, **self.request_options())
-            except requests.exceptions.MissingSchema:
-                public_message = 'Bad URL request made for identifier: %s.' % (ident,)
-                log_message = 'Bad URL request at %s for identifier: %s.' % (fp,ident)
-                logger.warn(log_message)
-                raise ResolverException(404, public_message)
-
-            if response.status_code != 200:
-                public_message = 'Source image not found for identifier: %s. Status code returned: %s' % (ident,response.status_code)
-                log_message = 'Source image not found at %s for identifier: %s. Status code returned: %s' % (fp,ident,response.status_code)
-                logger.warn(log_message)
-                raise ResolverException(404, public_message)
-
-            if 'content-type' in response.headers:
-                try:
-                    format = self.format_from_ident(ident, constants.FORMATS_BY_MEDIA_TYPE[response.headers['content-type']])
-                except KeyError:
-                    logger.warn('Your server may be responding with incorrect content-types. Reported %s for ident %s.'
-                                % (response.headers['content-type'],ident))
-                    #Attempt without the content-type
-                    format = self.format_from_ident(ident, None)
-            else:
+                format = self.format_from_ident(ident, constants.FORMATS_BY_MEDIA_TYPE[response.headers['content-type']])
+            except KeyError:
+                logger.warn('Your server may be responding with incorrect content-types. Reported %s for ident %s.'
+                            % (response.headers['content-type'],ident))
+                #Attempt without the content-type
                 format = self.format_from_ident(ident, None)
+        else:
+            format = self.format_from_ident(ident, None)
 
-            logger.debug('src format %s' % (format,))
+        logger.debug('src format %s' % (format,))
 
-            local_fp = join(local_fp, "loris_cache." + format)
+        local_fp = join(cache_dir, "loris_cache." + format)
 
-            try:
-                makedirs(dirname(local_fp))
-            except:
-                logger.debug("Directory already existed... possible problem if not a different format")
+        try:
+            makedirs(dirname(local_fp))
+        except:
+            logger.debug("Directory already existed... possible problem if not a different format")
 
-            with open(local_fp, 'wb') as fd:
-                for chunk in response.iter_content(2048):
-                    fd.write(chunk)
+        with open(local_fp, 'wb') as fd:
+            for chunk in response.iter_content(2048):
+                fd.write(chunk)
 
-            logger.info("Copied %s to %s" % (fp, local_fp))
+        logger.info("Copied %s to %s" % (fp, local_fp))
 
-            return (local_fp, format)
+
+    def resolve(self, ident):
+        cache_dir = self.cache_dir_path(ident)
+        if not exists(cache_dir):
+            self.copy_to_cache(ident)
+        cached_file_path = self.cached_object(ident)
+        format = self.format_from_ident(cached_file_path,None)
+        logger.debug('src image from local disk: %s' % (cached_file_path,))
+        return (cached_file_path, format)
 
 
 class TemplateHTTPResolver(SimpleHTTPResolver):
@@ -461,11 +495,11 @@ class SourceImageCachingResolver(_AbstractResolver):
         logger.info("Copied %s to %s" % (source_fp, cache_fp))
 
     def raise_404_for_ident(self, ident):
-            source_fp = self.source_file_path(ident)
-            public_message = 'Source image not found for identifier: %s.' % (ident,)
-            log_message = 'Source image not found at %s for identifier: %s.' % (source_fp,ident)
-            logger.warn(log_message)
-            raise ResolverException(404, public_message)
+        source_fp = self.source_file_path(ident)
+        public_message = 'Source image not found for identifier: %s.' % (ident,)
+        log_message = 'Source image not found at %s for identifier: %s.' % (source_fp,ident)
+        logger.warn(log_message)
+        raise ResolverException(404, public_message)
 
     def resolve(self, ident):
         if not self.is_resolvable(ident):
@@ -473,7 +507,7 @@ class SourceImageCachingResolver(_AbstractResolver):
 
         cache_fp = self.cache_file_path(ident)
         format = self.format_from_ident(ident)
-        logger.debug('src format %s' % (format,))
+        logger.debug('Source format %s' % (format,))
 
         if not self.in_cache(ident):
             self.copy_to_cache(ident)

@@ -5,7 +5,7 @@
 """
 from logging import getLogger
 from loris_exception import ResolverException
-from os.path import join, exists, isfile
+from os.path import join, exists
 from os import makedirs
 from os.path import dirname
 from shutil import copy
@@ -19,6 +19,7 @@ import requests
 import re
 
 logger = getLogger(__name__)
+
 
 class _AbstractResolver(object):
     def __init__(self, config):
@@ -97,17 +98,19 @@ class SimpleFSResolver(_AbstractResolver):
 
         return (fp, format)
 
-#To use this the resolver stanza of the config will have to have both the
-#src_img_root as required by the SimpleFSResolver and also an
-#[[extension_map]], which will be a hash mapping found extensions to the
-#extensions that loris wants to see, e.g.
+
+# To use this the resolver stanza of the config will have to have both the
+# src_img_root as required by the SimpleFSResolver and also an
+# [[extension_map]], which will be a hash mapping found extensions to the
+# extensions that loris wants to see, e.g.
+#
 # [resolver]
 # impl = 'loris.resolver.ExtensionNormalizingFSResolver'
 # src_img_root = '/cnfs-ro/iiif/production/medusa-root' # r--
 #   [[extension_map]]
 #   jpeg = 'jpg'
 #   tiff = 'tif'
-#Note that case normalization happens before looking up in the extension_map.
+# Note that case normalization happens before looking up in the extension_map.
 class ExtensionNormalizingFSResolver(SimpleFSResolver):
     def __init__(self, config):
         super(ExtensionNormalizingFSResolver, self).__init__(config)
@@ -222,10 +225,9 @@ class SimpleHTTPResolver(_AbstractResolver):
         elif ident.rfind('.') != -1 and (len(ident) - ident.rfind('.') <= 5):
             return ident.split('.')[-1]
         else:
-            public_message = 'Format could not be determined for: %s.' % (ident,)
-            log_message = 'Format could not be determined for: %s.' % (ident)
-            logger.warn(log_message)
-            raise ResolverException(404, public_message)
+            message = 'Format could not be determined for: %s.' % (ident)
+            logger.warn(message)
+            raise ResolverException(404, message)
 
     def _web_request_url(self, ident):
         if (ident[0:6] == 'http:/' or ident[0:7] == 'https:/') and self.uri_resolvable:
@@ -312,7 +314,7 @@ class SimpleHTTPResolver(_AbstractResolver):
                 extension = self.format_from_ident(ident, constants.FORMATS_BY_MEDIA_TYPE[response.headers['content-type']])
             except KeyError:
                 logger.warn('Your server may be responding with incorrect content-types. Reported %s for ident %s.'
-                            % (response.headers['content-type'],ident))
+                            % (response.headers['content-type'], ident))
                 # Attempt without the content-type
                 extension = self.format_from_ident(ident, None)
         else:

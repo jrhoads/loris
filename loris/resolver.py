@@ -59,6 +59,11 @@ class _AbstractResolver(object):
 
 
 class SimpleFSResolver(_AbstractResolver):
+    """
+    For this dumb version a constant path is prepended to the identfier
+    supplied to get the path It assumes this 'identifier' ends with a file
+    extension from which the format is then derived.
+    """
 
     def __init__(self, config):
         super(SimpleFSResolver, self).__init__(config)
@@ -67,7 +72,12 @@ class SimpleFSResolver(_AbstractResolver):
         else:
             self.source_roots = [self.config['src_img_root']]
 
-    def get_fp(self, ident):
+    def raise_404_for_ident(self, ident):
+        message = 'Source image not found for identifier: %s.' % (ident,)
+        logger.warn(message)
+        raise ResolverException(404, message)
+
+    def source_file_path(self, ident):
         ident = unquote(ident)
         for directory in self.source_roots:
             fp = join(directory, ident)
@@ -75,28 +85,23 @@ class SimpleFSResolver(_AbstractResolver):
                 return fp
 
     def is_resolvable(self, ident):
-        return not self.get_fp(ident) is None
+        return not self.source_file_path(ident) is None
 
     def format_from_ident(self, ident):
         return ident.split('.')[-1]
 
     def resolve(self, ident):
-        # For this dumb version a constant path is prepended to the identfier
-        # supplied to get the path It assumes this 'identifier' ends with a file
-        # extension from which the format is then derived.
-        fp = self.get_fp(ident)
-        logger.debug('src image: %s' % (fp,))
 
-        if fp is None:
-            public_message = 'Source image not found for identifier: %s.' % (ident,)
-            log_message = 'Source image not found at %s for identifier: %s.' % (fp,ident)
-            logger.warn(log_message)
-            raise ResolverException(404, public_message)
+        if not self.is_resolvable(ident):
+            self.raise_404_for_ident(ident)
+
+        source_fp = self.source_file_path(ident)
+        logger.debug('src image: %s' % (source_fp,))
 
         format = self.format_from_ident(ident)
         logger.debug('src format %s' % (format,))
 
-        return (fp, format)
+        return (source_fp, format)
 
 
 # To use this the resolver stanza of the config will have to have both the
@@ -510,16 +515,14 @@ class SourceImageCachingResolver(_AbstractResolver):
     def resolve(self, ident):
         if not self.is_resolvable(ident):
             self.raise_404_for_ident(ident)
-
-        cache_fp = self.cache_file_path(ident)
-        format = self.format_from_ident(ident)
-        logger.debug('Source format %s' % (format,))
-
         if not self.in_cache(ident):
             self.copy_to_cache(ident)
-        logger.debug(
-                'Image Served from local cache: %s' % (cache_fp,)
-        )
+
+        cache_fp = self.cache_file_path(ident)
+        logger.debug('Image Served from local cache: %s' % (cache_fp,))
+
+        format = self.format_from_ident(ident)
+        logger.debug('Source format %s' % (format,))
         return (cache_fp, format)
 
 
